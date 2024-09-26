@@ -1,0 +1,54 @@
+load("@rules_req_compile//:defs.bzl", "py_reqs_compiler", "py_reqs_solution_test")
+load("//python/isort:defs.bzl", "py_isort_test")
+
+exports_files([
+    "isort_regex_test.py",
+])
+
+py_isort_test(
+    name = "isort_runner_isort_test",
+    target = "//python/isort/private:isort_runner",
+)
+
+py_isort_test(
+    name = "isort_fixer_isort_test",
+    target = "//python/isort/private:isort_fixer",
+)
+
+filegroup(
+    name = "test_requirements_in",
+    srcs = ["test_requirements.in"],
+    data = ["//python/isort/private/3rdparty:requirements.in"],
+)
+
+PLATFORMS = [
+    "linux",
+    "macos",
+    "windows",
+]
+
+[
+    py_reqs_compiler(
+        name = "test_requirements.{}.update".format(platform),
+        requirements_in = "test_requirements_in",
+        requirements_txt = "test_requirements_{}.txt".format(platform),
+        target_compatible_with = ["@platforms//os:{}".format(platform)],
+    )
+    for platform in PLATFORMS
+]
+
+[
+    py_reqs_solution_test(
+        name = "test_requirements_{}_test".format(platform),
+        compiler = ":test_requirements.{}.update".format(platform),
+    )
+    for platform in PLATFORMS
+]
+
+alias(
+    name = "test_requirements.update",
+    actual = select({
+        "@platforms//os:{}".format(platform): ":test_requirements.{}.update".format(platform)
+        for platform in PLATFORMS
+    }),
+)

@@ -1,6 +1,4 @@
-<!-- Generated with Stardoc: http://skydoc.bazel.build -->
-
-# rules_isort
+"""# rules_isort
 
 ## Overview
 
@@ -98,65 +96,18 @@ random directories unexpectedly being considered first party packages.
 
 ---
 ---
+"""
 
-<a id="py_isort_test"></a>
+load(
+    "//python/isort/private:isort.bzl",
+    _py_isort_aspect = "py_isort_aspect",
+    _py_isort_test = "py_isort_test",
+)
+load(
+    "//python/isort/private:isort_toolchain.bzl",
+    _py_isort_toolchain = "py_isort_toolchain",
+)
 
-## py_isort_test
-
-<pre>
-py_isort_test(<a href="#py_isort_test-name">name</a>, <a href="#py_isort_test-config">config</a>, <a href="#py_isort_test-target">target</a>)
-</pre>
-
-A rule for running isort on a Python target.
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="py_isort_test-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-| <a id="py_isort_test-config"></a>config |  The config file (isortrc) containing isort settings.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `"@rules_isort//python/isort:config"`  |
-| <a id="py_isort_test-target"></a>target |  The target to run `isort` on.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
-
-
-<a id="py_isort_toolchain"></a>
-
-## py_isort_toolchain
-
-<pre>
-py_isort_toolchain(<a href="#py_isort_toolchain-name">name</a>, <a href="#py_isort_toolchain-isort">isort</a>)
-</pre>
-
-A toolchain for the [isort](https://pycqa.github.io/isort/index.html) formatter rules.
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="py_isort_toolchain-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-| <a id="py_isort_toolchain-isort"></a>isort |  The isort `py_library` to use with the rules.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
-
-
-<a id="py_isort_aspect"></a>
-
-## py_isort_aspect
-
-<pre>
-py_isort_aspect(<a href="#py_isort_aspect-name">name</a>)
-</pre>
-
-An aspect for running isort on targets with Python sources.
-
-**ASPECT ATTRIBUTES**
-
-
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="py_isort_aspect-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-
-
+py_isort_aspect = _py_isort_aspect
+py_isort_test = _py_isort_test
+py_isort_toolchain = _py_isort_toolchain
