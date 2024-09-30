@@ -234,7 +234,7 @@ def main() -> None:
     srcs_query_template = r"""let scope = {scope} in filter("^//.*\.py$", kind("source file", deps($scope except attr(tags, "(^\[|, )(noformat|no-format|no_format|no-isort-format|no_isort_format)(, |\]$)", $scope), 1)))"""  # pylint: disable=line-too-long
 
     # Query for targets which do not specify `imports = ["."]`
-    srcs_scope = r"""kind(py_.*, set({scope}) except attr(imports, "[\.\w\d\-_]+", kind("py_*", set({scope})))""".format(  # pylint: disable=line-too-long
+    srcs_scope = r"""kind(py_.*, set({scope}) except attr(imports, "[\.\w\d\-_]+", kind("py_*", set({scope}))))""".format(  # pylint: disable=line-too-long
         scope=" ".join(args.scope)
     )
 
@@ -254,7 +254,7 @@ def main() -> None:
     # pylint: disable-next=consider-using-dict-items
     for target in imports:
         imports[target]["src_targets"] = query_targets(
-            srcs_query_template.replace("{scope}", f"set({target})"),
+            srcs_query_template.replace("{scope}", target),
             args.bazel,
             workspace_dir,
         )
