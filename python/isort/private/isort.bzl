@@ -203,13 +203,17 @@ py_isort_test = rule(
 )
 
 def _py_isort_aspect_impl(target, ctx):
-    for ignore_tag in [
-        "no-isort",
-        "no-lint",
-        "no_lint",
-        "nolint",
-    ]:
-        if ignore_tag in ctx.rule.attr.tags:
+    ignore_tags = [
+        "no_format",
+        "no_isort_fmt",
+        "no_isort_format",
+        "no_isort",
+        "noformat",
+        "noisort",
+    ]
+    for tag in ctx.rule.attr.tags:
+        sanitized = tag.replace("-", "_").lower()
+        if sanitized in ignore_tags:
             return []
 
     isort_info = target[PyIsortInfo]
@@ -263,6 +267,7 @@ def _py_isort_aspect_impl(target, ctx):
         tools = runfiles.files,
         outputs = [marker],
         arguments = [args],
+        env = ctx.configuration.default_shell_env,
     )
 
     return [OutputGroupInfo(

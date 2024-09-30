@@ -16,7 +16,6 @@ from python.isort.private.isort_runner import generate_config_with_projects
 
 # isort gets confused seeing itself in a file, explicitly skip sorting this
 # isort: off
-
 from isort.main import main as isort_main
 
 
@@ -184,25 +183,35 @@ def run_isort(
     # Convert the targets to source paths
     sources = [target.replace(":", "/").replace("//", "") for target in targets]
 
-    environ = dict(os.environ)
-    environ["PY_ISORT_MAIN"] = __file__
+    isort_args = ["--settings-path", str(settings_path)]
 
-    isort_args = [
-        sys.executable,
-        __file__,
-        "--settings-path",
-        str(settings_path),
-    ]
+    if "RULES_ISORT_DEBUG" in os.environ:
+        isort_args.append("--verbose")
+        settings_content = settings_path.read_text(encoding="utf-8")
+        print(
+            f"isort config:\n```\n{settings_content}\n```",
+            file=sys.stderr,
+        )
 
     isort_args.extend(sources)
 
-    # Run isort
-    subprocess.run(
-        isort_args,
-        check=True,
-        cwd=str(workspace_dir),
-        env=environ,
-    )
+    exit_code = 0
+    old_cwd = os.getcwd()
+    os.chdir(workspace_dir)
+    try:
+        isort_main(isort_args)
+
+    except SystemExit as exc:
+        if exc.code is None:
+            exit_code = 0
+        elif isinstance(exc.code, str):
+            exit_code = int(exc.code)
+        else:
+            exit_code = exc.code
+    os.chdir(old_cwd)
+
+    if exit_code != 0:
+        sys.exit(exit_code)
 
 
 # pylint: disable=too-many-locals
@@ -295,15 +304,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Conditionally run the `isort` entrypoint from the `isort` package. This
-    # environment variable is set above and acts as the toggle for running the
-    # underlying tool this script is wrapping. This is done because running
-    # python entrypoints can be expensive (in environments that don't support
-    # runfiles/symlinks) and complicated (needing to deal with a regenerated
-    # PYTHONPATH variable). If this variable is set and matches an expected
-    # value then it's assumed this script is running as an subprocess and we
-    # want to instead run a different entrypoint.
-    if os.getenv("PY_ISORT_MAIN") == __file__:
-        isort_main()
-    else:
-        main()
+    main()

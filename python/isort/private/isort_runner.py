@@ -2,15 +2,20 @@
 
 import argparse
 import configparser
+import contextlib
+import io
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Generator, List, Optional, Sequence
 
 from python.runfiles import Runfiles
+
+# isort gets confused seeing itself in a file, explicitly skip sorting this
+# isort: off
+from isort.main import main as isort_main
 
 
 def _rlocation(runfiles: Runfiles, rlocationpath: str) -> Path:
@@ -91,23 +96,18 @@ def parse_args(args: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def locate_first_party_src_paths(imports: Sequence[str]) -> List[str]:
+def locate_first_party_src_paths(
+    runfiles_dir: Path, imports: Sequence[str]
+) -> List[str]:
     """Determine the list of first party packages.
 
     Args:
+        runfiles_dir: The path to fully formed runfiles.
         imports: The runfiles import paths.
 
     Returns:
         The names of top level modules in the given root.
     """
-
-    # Determined by rules_venv
-    if "PY_VENV_RUNFILES_DIR" in os.environ:
-        runfiles_dir = Path(os.environ["PY_VENV_RUNFILES_DIR"])
-    elif "RUNFILES_DIR" in os.environ:
-        runfiles_dir = Path(os.environ["RUNFILES_DIR"])
-    else:
-        raise EnvironmentError("Unable to locate runfiles directory.")
 
     return [str(runfiles_dir / path) for path in imports]
 
@@ -161,89 +161,111 @@ def generate_config_with_projects(
     raise ValueError(f"Unexpected isort config file '{existing}'.")
 
 
-def main() -> None:
-    """The main entrypoint."""
-    if "BAZEL_TEST" in os.environ and "PY_ISORT_RUNNER_ARGS_FILE" in os.environ:
-        runfiles = Runfiles.Create()
-        if not runfiles:
-            raise EnvironmentError("Failed to locate runfiles")
-        arg_file = _rlocation(runfiles, os.environ["PY_ISORT_RUNNER_ARGS_FILE"])
-        args = parse_args(arg_file.read_text(encoding="utf-8").splitlines())
-    else:
-        args = parse_args()
-
-    environ = dict(os.environ)
-    environ["PY_ISORT_MAIN"] = __file__
-
-    imports = locate_first_party_src_paths(args.imports)
-
-    temp_dir = tempfile.mkdtemp(
-        prefix="bazel_rules_isort-", dir=os.getenv("TEST_TMPDIR")
-    )
-    try:
-        isort_args = [
-            sys.executable,
-            __file__,
-        ]
-
-        settings_path = Path(temp_dir) / args.settings_path.name
-        generate_config_with_projects(args.settings_path, settings_path, imports)
-
-        isort_args.extend(["--settings-path", str(settings_path)])
-        isort_args.extend(args.isort_args)
-        isort_args.extend([str(src) for src in args.sources])
-
-        # Run isort on all requested sources
-        result = subprocess.run(
-            isort_args,
-            check=False,
-            encoding="utf-8",
-            stderr=subprocess.STDOUT,
-            stdout=subprocess.PIPE,
-            env=environ,
-        )
-    finally:
-        # Only cleanup the temp dir when running outside of a test.
-        if "TEST_TMPDIR" not in os.environ:
-            shutil.rmtree(temp_dir)
-
-    if result.returncode:
-        # Sanitize error messages
-        output = result.stdout
-        if "RUNFILES_DIR" in os.environ:
-            output = output.replace(os.environ["RUNFILES_DIR"], "//")
-        output = output.replace(str(Path.cwd()), "/")
-
-        print(output, file=sys.stderr)
-
-        sys.exit(result.returncode)
-
-    # Satisfy the action by writing a consistent output file.
-    if args.marker:
-        args.marker.write_bytes(b"")
-
-
 def _no_realpath(path, **_kwargs):  # type: ignore
     """Redirect realpath, with any keyword args, to abspath."""
     return os.path.abspath(path)
 
 
+@contextlib.contextmanager
+def determinisim_patch() -> Generator[None, None, None]:
+    """A context manager for applying determinisitc behavior to the python stdlib."""
+
+    # Avoid sandbox escapes
+    old_realpath = os.path.realpath
+    os.path.realpath = _no_realpath  # type: ignore
+
+    try:
+        yield
+    finally:
+        os.path.realpath = old_realpath
+
+
+def _load_args() -> Sequence[str]:
+    """Load command line arguments from the environment."""
+    if "BAZEL_TEST" in os.environ and "PY_ISORT_RUNNER_ARGS_FILE" in os.environ:
+        runfiles = Runfiles.Create()
+        if not runfiles:
+            raise EnvironmentError("Failed to locate runfiles")
+        arg_file = _rlocation(runfiles, os.environ["PY_ISORT_RUNNER_ARGS_FILE"])
+        return arg_file.read_text(encoding="utf-8").splitlines()
+
+    return sys.argv[1:]
+
+
+def _get_runfiles_dir() -> Path:
+    """Locate the runfiles directory from the environment."""
+    # Determined by rules_venv
+    if "PY_VENV_RUNFILES_DIR" in os.environ:
+        return Path(os.environ["PY_VENV_RUNFILES_DIR"])
+    if "RUNFILES_DIR" in os.environ:
+        return Path(os.environ["RUNFILES_DIR"])
+
+    raise EnvironmentError("Unable to locate runfiles directory.")
+
+
+def main() -> None:
+    """The main entrypoint."""
+    args = parse_args(_load_args())
+
+    runfiles_dir = _get_runfiles_dir()
+    imports = locate_first_party_src_paths(runfiles_dir, args.imports)
+
+    old_stderr = sys.stderr
+    old_stdout = sys.stdout
+
+    stream = io.StringIO()
+    if args.marker:
+        sys.stderr = stream
+        sys.stdout = stream
+
+    exit_code = 0
+    temp_dir = tempfile.mkdtemp(prefix="bazel_isort-", dir=os.getenv("TEST_TMPDIR"))
+    try:
+        os.environ["HOME"] = str(temp_dir)
+        os.environ["USERPROFILE"] = str(temp_dir)
+
+        settings_path = Path(temp_dir) / args.settings_path.name
+        generate_config_with_projects(args.settings_path, settings_path, imports)
+
+        isort_args = ["--settings-path", str(settings_path)]
+
+        if "RULES_ISORT_DEBUG" in os.environ:
+            isort_args.append("--verbose")
+            settings_content = settings_path.read_text(encoding="utf-8")
+            print(
+                f"isort config:\n```\n{settings_content}\n```",
+                file=sys.stderr,
+            )
+
+        isort_args.extend(args.isort_args + [str(src) for src in args.sources])
+
+        with determinisim_patch():
+            isort_main(isort_args)
+
+    except SystemExit as exc:
+        if exc.code is None:
+            exit_code = 0
+        elif isinstance(exc.code, str):
+            exit_code = int(exc.code)
+        else:
+            exit_code = exc.code
+
+    finally:
+        if args.marker:
+            sys.stderr = old_stderr
+            sys.stdout = old_stdout
+
+        if "TEST_TMPDIR" not in os.environ and "RULES_ISORT_DEBUG" not in os.environ:
+            shutil.rmtree(temp_dir)
+
+    if args.marker:
+        if exit_code == 0:
+            args.marker.write_bytes(b"")
+        else:
+            print(stream.getvalue(), file=sys.stderr)
+
+    sys.exit(exit_code)
+
+
 if __name__ == "__main__":
-    # Conditionally run the `isort` entrypoint from the `isort` package. This
-    # environment variable is set above and acts as the toggle for running the
-    # underlying tool this script is wrapping. This is done because running
-    # python entrypoints can be expensive (in environments that don't support
-    # runfiles/symlinks) and complicated (needing to deal with a regenerated
-    # PYTHONPATH variable). If this variable is set and matches an expected
-    # value then it's assumed this script is running as an subprocess and we
-    # want to instead run a different entrypoint.
-    if os.getenv("PY_ISORT_MAIN") == __file__:
-        os.path.realpath = _no_realpath  # type: ignore
-
-        # isort gets confused seeing itself in a file, explicitly skip sorting this
-        # isort: off
-        from isort.main import main as isort_main
-
-        isort_main()
-    else:
-        main()
+    main()
